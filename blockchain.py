@@ -1,5 +1,7 @@
 import hashlib
 import json
+import requests
+from urllib.parse import urlparse
 from textwrap import dedent
 from time import time
 from uuid import uuid4
@@ -10,7 +12,7 @@ class Blockchain(object):
         # Inicializa a blockchain e uma lista de transações atuais
         self.chain = []  # Lista que irá armazenar a blockchain completa
         self.currentTransactions = []  # Lista de transações que serão incluídas no próximo bloco
-
+        self.nodes = set()  # Conjunto de nós registrados na rede
         # Cria o bloco gênesis (primeiro bloco da blockchain)
         self.newBlock(previousHash=1, proof=100)
 
@@ -66,6 +68,76 @@ class Blockchain(object):
         while self.validProof(lastProof, proof) is False:
             proof += 1
         return proof
+
+    def registerNode(self, address):
+        """
+        Adiciona um novo nó à lista de nós
+        :param address: <str> Endereço do nó. Ex.: 'http://192.168.0.5:5000'
+        :return: None
+        """
+        # Analisa a URL e adiciona o nó à lista de nós registrados
+        parsedUrl = urlparse(address)
+        self.nodes.add(parsedUrl.netloc)
+    
+    def validChain(self, chain):
+        """
+        Determina se uma blockchain fornecida é válida
+        :param chain: <list> Uma blockchain
+        :return: <bool> True se válida, False se não for
+        """
+        lastBlock = chain[0]
+        currentIndex = 1
+
+        # Verifica se cada bloco na cadeia é válido
+        while currentIndex < len(chain):
+            block = chain[currentIndex]
+            print(f'{lastBlock}')
+            print(f'{block}')
+            print("\n-----------\n")
+
+            # Verifica se o hash do bloco anterior está correto
+            if block['previousHash'] != self.hash(lastBlock):
+                return False
+
+            # Verifica se o proof do bloco é válido
+            if not self.validProof(lastBlock['proof'], block['proof']):
+                return False
+
+            lastBlock = block
+            currentIndex += 1
+        return True
+    
+    def resolveConflicts(self):
+        """
+        Este é o nosso Algoritmo de Consenso, ele resolve conflitos
+        substituindo nossa cadeia pela mais longa na rede.
+        :return: <bool> True se nossa cadeia foi substituída, False se não foi
+        """
+        neighbours = self.nodes
+        newChain = None
+
+        # Apenas considera cadeias mais longas que a nossa
+        maxLength = len(self.chain)
+
+        # Verifica todas as cadeias dos nós na rede
+        for node in neighbours:
+            response = requests.get(f'http://{node}/chain')
+
+            if response.status_code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+
+                # Verifica se a cadeia recebida é mais longa e válida
+                if length > maxLength and self.validChain(chain):
+                    maxLength = length
+                    newChain = chain
+
+        # Substitui a cadeia atual se encontrar uma nova cadeia válida e mais longa
+        if newChain:
+            self.chain = newChain
+            return True
+
+        return False
 
     @staticmethod
     def validProof(lastProof, proof):
@@ -161,6 +233,47 @@ def fullChain():
     }
     return jsonify(response), 200
 
+@app.route('/nodes/register', methods=['POST'])
+def registerNodes():
+    # Endpoint para registrar novos nós na rede
+
+    values = request.get_json()  # Obtém os dados da requisição
+
+    # Obtém a lista de nós a serem registrados
+    nodes = values.get('nodes')
+    if nodes is None:
+        return "Error: Por favor, forneça uma lista válida de nós", 400
+
+    # Registra cada nó na lista
+    for node in nodes:
+        blockchain.registerNode(node)
+
+    response = {
+        'mensagem': 'Novos nós foram adicionados',
+        'totalNodes': list(blockchain.nodes)
+    }
+    return jsonify(response), 201
+
+@app.route('/nodes/resolve', methods=['GET'])
+def consensus():
+    # Endpoint para resolver conflitos de blockchain na rede
+
+    replaced = blockchain.resolveConflicts()
+
+    # Verifica se a blockchain foi substituída por uma mais longa
+    if replaced:
+        response = {
+            'mensagem': 'Nossa chain foi substituída',
+            'newChain': blockchain.chain
+        }
+    else:
+        response = {
+            'mensagem': 'Nossa chain é autoritativa',
+            'chain': blockchain.chain
+        }
+
+    return jsonify(response), 200
+
+# Roda o servidor Flask
 if __name__ == '__main__':
-    # Executa o servidor Flask
     app.run(host='0.0.0.0', port=5000)
