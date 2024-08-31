@@ -182,8 +182,3 @@ Você pode usar o Postman para testar os endpoints da API:
 ## Contribuição
 
 Sinta-se à vontade para abrir issues ou enviar pull requests para melhorias e correções.
-
-## Licença
-
-Este projeto está licenciado sob a [MIT License](LICENSE).
-
